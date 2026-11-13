@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Autojobber Dashboard</title>
+<style>
+:root{--bg:#fbfbfa;--fg:#1d2227;--mut:#5f6b76;--line:#dfe3e6;--panel:#f1f4f6;--acc:#0a63c9;--warn:#a05a00;--bad:#b3261e;--on:#fff}
+@media(prefers-color-scheme:dark){:root{--bg:#13171b;--fg:#e6e9ec;--mut:#98a3ad;--line:#2b323a;--panel:#1b2127;--acc:#6db1ff;--warn:#e8a54b;--bad:#ff8a80;--on:#0b1218}}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,sans-serif;padding:24px max(16px,env(safe-area-inset-left))}
+main{max-width:980px;margin:auto}h1{margin:0 0 4px;font-size:24px}h2{font-size:16px;margin:26px 0 8px}h2 span{color:var(--mut);font-weight:400}
+.sub{color:var(--mut);margin:0}.top{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0}
+.tiles{display:flex;gap:10px;flex-wrap:wrap}.tile{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 16px;min-width:110px}
+.tile b{display:block;font-size:26px}.tile span{color:var(--mut);font-size:13px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:8px 0;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start}
+.score{font-size:24px;font-weight:700;min-width:44px}.body{flex:1 1 260px;min-width:0}.body a{color:var(--acc);font-weight:600;text-decoration:none;overflow-wrap:anywhere}
+.meta{color:var(--mut);font-size:13px;overflow-wrap:anywhere}.note{font-size:13px;margin-top:4px}.note.b{color:var(--warn)}
+.acts{display:flex;gap:8px;flex-wrap:wrap}button{font:inherit;border-radius:6px;border:1px solid var(--line);background:var(--bg);color:var(--fg);padding:6px 14px;cursor:pointer}
+button.go{background:var(--acc);border-color:var(--acc);color:var(--on);font-weight:600}button:disabled{opacity:.5}.empty{color:var(--mut);border:1px dashed var(--line);border-radius:8px;padding:14px}
+#msg{color:var(--bad);min-height:1.2em;font-size:13px}form{display:inline}
+</style></head><body><main>
+<h1>Autojobber</h1><p class="sub" id="sub">Loading.</p>
+<div class="top"><button id="run" class="go" type="button">Find new jobs now</button><span class="sub" id="runmsg"></span>
+<form method="post" action="/logout"><button type="submit">Sign out</button></form></div>
+<div class="tiles" id="tiles"></div><p id="msg" role="status"></p><div id="lists"></div>
+<p class="sub">Approve queues a job for the application agent in your Chrome. It fills in the form and stops for you at any CAPTCHA and at Submit. Scores are provisional until the full posting is read.</p>
+</main>
+<script>
+var SECTIONS=[["ready","Ready for you to submit"],["approved","Approved, waiting for the agent"],["applying","Agent is filling it in"],["queued","Needs your approval"],["blocked","Needs you"],["applied","Applied"]];
+var jobs=[],last=null;
+function el(t,c,x){var e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e}
+function say(m){document.getElementById("msg").textContent=m||""}
+function api(path,body){return fetch(path,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body||{})}).then(function(r){if(r.status===401){location.reload();throw new Error("login")}return r.json().then(function(j){if(!r.ok)throw new Error(j.error||"error");return j})})}
+function setStatus(k,s,n){say("");return api("/api/jobs/"+encodeURIComponent(k)+"/status",{status:s,note:n||""}).then(load).catch(function(e){say("Could not save: "+e.message)})}
+function btn(label,cls,fn){var b=el("button",cls,label);b.onclick=fn;return b}
+function card(j){var c=el("div","card");c.appendChild(el("div","score",j.score!=null?String(j.score):"–"));
+ var b=el("div","body"),a=el("a",null,j.title);a.href=j.url;a.target="_blank";a.rel="noopener";b.appendChild(a);
+ b.appendChild(el("div","meta",[j.company,j.location,j.salary,j.source].filter(Boolean).join(" · ")));
+ if(j.agent_note)b.appendChild(el("div","note"+(j.status==="blocked"?" b":""),j.agent_note));else if(j.status==="queued"&&j.notes)b.appendChild(el("div","note meta",j.notes));
+ c.appendChild(b);var x=el("div","acts"),k=j.key;
+ if(j.status==="queued"||j.status==="blocked"){x.appendChild(btn(j.status==="blocked"?"Retry":"Approve","go",function(){setStatus(k,"approved")}));x.appendChild(btn("Skip",null,function(){setStatus(k,"skipped")}))}
+ else if(j.status==="ready"){x.appendChild(btn("I submitted it","go",function(){setStatus(k,"applied","Submitted by owner")}));x.appendChild(btn("Not applying",null,function(){setStatus(k,"skipped")}))}
+ else if(j.status==="approved"){x.appendChild(btn("Undo",null,function(){setStatus(k,"queued")}))}
+ c.appendChild(x);return c}
+function render(){var n={};jobs.forEach(function(j){n[j.status]=(n[j.status]||0)+1});
+ var t=document.getElementById("tiles");t.replaceChildren();[["queued","To approve"],["approved","Approved"],["ready","Ready to submit"],["applied","Applied"],["blocked","Needs you"]].forEach(function(p){var d=el("div","tile");d.appendChild(el("b",null,String(n[p[0]]||0)));d.appendChild(el("span",null,p[1]));t.appendChild(d)});
+ document.getElementById("sub").textContent=jobs.length+" jobs tracked."+(last?" Last search "+new Date(last.at).toLocaleString()+": "+last.added+" new.":" No search has run yet.");
+ var root=document.getElementById("lists");root.replaceChildren();
+ SECTIONS.forEach(function(s){var rows=jobs.filter(function(j){return j.status===s[0]});if(!rows.length&&s[0]!=="queued")return;
+  var h=el("h2",null,s[1]+" ");h.appendChild(el("span",null,String(rows.length)));root.appendChild(h);
+  if(!rows.length){root.appendChild(el("div","empty","Nothing waiting. Press Find new jobs now."));return}rows.forEach(function(j){root.appendChild(card(j))})})}
+function load(){return fetch("/api/jobs").then(function(r){if(r.status===401){location.reload();return null}return r.json()}).then(function(d){if(d){jobs=d.jobs;last=d.lastRun;render()}}).catch(function(){say("Could not load jobs.")})}
+document.getElementById("run").onclick=function(){var b=this,m=document.getElementById("runmsg");b.disabled=true;m.textContent="Searching, this takes under a minute...";
+ api("/api/search").then(function(r){m.textContent=r.busy?"A search is already running.":"Done: "+r.added+" new job"+(r.added===1?"":"s")+".";return load()}).catch(function(e){m.textContent="Search failed: "+e.message}).then(function(){b.disabled=false})};
+load();setInterval(load,30000);
+</script></body></html>
